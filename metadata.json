@@ -1,0 +1,6 @@
+{
+  "name": "होम सिक्योरिटी कैमरा",
+  "description": "Secure P2P Home Security Camera and Remote Monitor with on-demand standby, zero-latency streaming, remote flashlight control, and full WhatsApp/IMO call protection.",
+  "requestFramePermissions": ["camera", "microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
