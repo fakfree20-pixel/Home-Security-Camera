@@ -120,6 +120,27 @@ export const PrivacyGuideModal: React.FC<PrivacyGuideModalProps> = ({ isOpen, on
               <li><b>कोई व्यवधान नहीं:</b> आप बेझिझक इमो और व्हाट्सएप पर बात कर सकते हैं, आवाज़ साफ़ आएगी और कोई एरर नहीं आएगा।</li>
             </ul>
           </div>
+
+          {/* Section 7: Mobile App & APK Installation Guide */}
+          <div className="p-3.5 rounded-xl bg-indigo-50 border border-indigo-200 space-y-2">
+            <div className="flex items-center gap-2 font-bold text-indigo-950 text-xs sm:text-sm">
+              <Smartphone className="w-4 h-4 text-indigo-600 shrink-0" />
+              <span>7. मोबाइल में APK या ऐप कैसे इंस्टॉल करें?</span>
+            </div>
+            <p className="text-xs text-slate-700 leading-relaxed">
+              गिटहब (GitHub) से सीधे APK इसलिए नहीं बनता क्योंकि यह एक आधुनिक वेब-आधारित ऐप है। इसे अपने मोबाइल में असली ऐप बनाने के दो आसान तरीके हैं:
+            </p>
+            <ul className="list-disc list-inside text-xs text-slate-600 space-y-2">
+              <li>
+                <b>तरीका 1 (सबसे आसान - बिना APK डाउनलोड किए सीधे इंस्टॉल):</b><br />
+                फ़ोन के Google Chrome ब्राउज़र में इस ऐप का लिंक खोलें। ऊपर Chrome के तीन डॉट्स (⋮) पर क्लिक करें और <b>"Install app"</b> या <b>"Add to Home screen"</b> दबाएँ। यह तुरंत आपके फ़ोन की स्क्रीन पर असली ऐप की तरह इंस्टॉल हो जाएगा।
+              </li>
+              <li>
+                <b>तरीका 2 (असली .apk फ़ाइल डाउनलोड करना):</b><br />
+                यदि आपको किसी को भेजने के लिए असली .apk फ़ाइल चाहिए, तो मुफ़्त टूल <a href="https://www.pwabuilder.com" target="_blank" rel="noreferrer" className="text-indigo-600 underline font-bold">PWABuilder.com</a> पर जाएँ, इस ऐप का लिंक डालें और <b>"Generate Android Package / APK"</b> पर क्लिक करके 1 मिनट में सीधा APK डाउनलोड कर लें।
+              </li>
+            </ul>
+          </div>
         </div>
 
         <div className="mt-6 flex justify-end">

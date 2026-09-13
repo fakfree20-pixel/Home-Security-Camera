@@ -1,0 +1,80 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: 22.x
+
+    - name: Install dependencies
+      run: npm install --no-audit
+
+    - name: Build Web app
+      run: npm run build
+
+    - name: Set up JDK 17
+      uses: actions/setup-java@v4
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+
+    - name: Setup Android SDK
+      uses: android-actions/setup-android@v3
+
+    - name: Setup Gradle
+      uses: gradle/actions/setup-gradle@v3
+
+    - name: Prepare Gradle Wrapper
+      working-directory: ./android
+      run: |
+        gradle wrapper --gradle-version 8.4 || true
+        chmod +x gradlew || true
+
+    - name: Build Android Debug APK
+      working-directory: ./android
+      run: |
+        if [ -f "./gradlew" ]; then
+          ./gradlew assembleDebug --stacktrace
+        else
+          gradle assembleDebug --stacktrace
+        fi
+
+    - name: Prepare Output APK
+      run: |
+        mkdir -p output-apk
+        find android/app/build/outputs/apk -name "*.apk" -exec cp {} output-apk/Home-Security-Camera.apk \;
+
+    - name: Upload APK Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: Home-Security-Camera-APK
+        path: output-apk/Home-Security-Camera.apk
+        retention-days: 30
+
+    - name: Release APK (optional)
+      if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: v1.0.${{ github.run_number }}
+        name: "Home Security Camera v1.0.${{ github.run_number }}"
+        body: |
+          ### होम सिक्योरिटी कैमरा Android APK
+          - सीधा अपने Android मोबाइल में डाउनलोड और इंस्टॉल करें।
+        files: output-apk/Home-Security-Camera.apk
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      continue-on-error: true

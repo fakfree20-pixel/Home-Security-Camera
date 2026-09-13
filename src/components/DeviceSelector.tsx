@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Camera, 
   Monitor, 
@@ -12,7 +12,8 @@ import {
   Headphones,
   Sliders,
   Smartphone,
-  Power
+  Power,
+  Download
 } from 'lucide-react';
 import { generateRoomCode } from '../utils/webrtc';
 
@@ -28,6 +29,35 @@ export const DeviceSelector: React.FC<DeviceSelectorProps> = ({
   const [homeCode, setHomeCode] = useState(() => generateRoomCode());
   const [joinCode, setJoinCode] = useState('');
   const [joinError, setJoinError] = useState('');
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [isInstalled, setIsInstalled] = useState(false);
+
+  useEffect(() => {
+    const handler = (e: any) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    };
+    window.addEventListener('beforeinstallprompt', handler);
+
+    window.addEventListener('appinstalled', () => {
+      setIsInstalled(true);
+      setDeferredPrompt(null);
+    });
+
+    return () => window.removeEventListener('beforeinstallprompt', handler);
+  }, []);
+
+  const handleInstallPWA = async () => {
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      const choice = await deferredPrompt.userChoice;
+      if (choice && choice.outcome === 'accepted') {
+        setDeferredPrompt(null);
+      }
+    } else {
+      onOpenGuide();
+    }
+  };
 
   const handleStartHome = () => {
     if (!homeCode.trim()) {
@@ -66,6 +96,40 @@ export const DeviceSelector: React.FC<DeviceSelectorProps> = ({
         <p className="text-sm sm:text-base text-slate-600 max-w-xl mx-auto leading-relaxed">
           घर वाले मोबाइल में कैमरा-माइक हमेशा ऑन नहीं रहता। जब बाहर वाला कोड डालकर कनेक्ट करेगा तभी ऑन होगा, और बाहर वाले के हटते ही खुद तुरंत बंद हो जाएगा।
         </p>
+      </div>
+
+      {/* Mobile App / APK Installation Banner */}
+      <div className="w-full max-w-3xl mb-6 p-4 rounded-2xl bg-gradient-to-r from-slate-900 to-indigo-950 text-white shadow-md flex flex-col sm:flex-row items-center justify-between gap-4 border border-indigo-800/40">
+        <div className="flex items-center gap-3">
+          <div className="w-11 h-11 rounded-xl bg-indigo-500/20 border border-indigo-400/30 flex items-center justify-center shrink-0 text-indigo-300">
+            <Smartphone className="w-5 h-5" />
+          </div>
+          <div className="text-left">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs sm:text-sm font-bold text-white">
+                📱 मोबाइल में ऐप इंस्टॉल करें (PWA / APK)
+              </span>
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                बिना डाउनलोड के तुरंत चालू
+              </span>
+            </div>
+            <p className="text-[11px] sm:text-xs text-slate-300 mt-0.5">
+              Chrome ब्राउज़र में 1-क्लिक में फ़ोन पर असली ऐप की तरह इंस्टॉल करें या APK डाउनलोड करें
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 w-full sm:w-auto shrink-0">
+          <button
+            id="btn-install-pwa-app"
+            type="button"
+            onClick={handleInstallPWA}
+            className="w-full sm:w-auto px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold shadow-sm transition flex items-center justify-center gap-2 cursor-pointer"
+          >
+            <Download className="w-4 h-4" />
+            <span>{deferredPrompt ? 'फ़ोन में इंस्टॉल करें' : 'APK / ऐप कैसे लें?'}</span>
+          </button>
+        </div>
       </div>
 
       {/* Two Choice Cards */}
