@@ -19,10 +19,12 @@ import {
   Lock,
   Sparkles,
   Power,
-  PhoneCall
+  PhoneCall,
+  Smartphone
 } from 'lucide-react';
 import { StreamMode, VoiceFilterType } from '../types/camera';
 import { RTC_CONFIG } from '../utils/webrtc';
+import { BatteryIndicator } from './BatteryIndicator';
 
 interface RemoteMonitorViewProps {
   roomCode: string;
@@ -47,6 +49,8 @@ export const RemoteMonitorView: React.FC<RemoteMonitorViewProps> = ({
   const [pingMs, setPingMs] = useState<number | null>(null);
   const [isHomeInPhoneCall, setIsHomeInPhoneCall] = useState(false);
   const [homeCallReason, setHomeCallReason] = useState('');
+  const [homeBatteryLevel, setHomeBatteryLevel] = useState<number | null>(null);
+  const [homeIsCharging, setHomeIsCharging] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -171,6 +175,12 @@ export const RemoteMonitorView: React.FC<RemoteMonitorViewProps> = ({
           if (msg.payload.isPhoneCallActive !== undefined) {
             setIsHomeInPhoneCall(msg.payload.isPhoneCallActive);
             setHomeCallReason(msg.payload.callReason || '');
+          }
+          if (msg.payload.batteryLevel !== undefined) {
+            setHomeBatteryLevel(msg.payload.batteryLevel);
+          }
+          if (msg.payload.isCharging !== undefined) {
+            setHomeIsCharging(!!msg.payload.isCharging);
           }
         }
       } catch (err) {
@@ -436,6 +446,15 @@ export const RemoteMonitorView: React.FC<RemoteMonitorViewProps> = ({
         </div>
 
         <div className="flex items-center gap-2">
+          {/* Home Phone Battery Status */}
+          <BatteryIndicator 
+            level={homeBatteryLevel} 
+            isCharging={homeIsCharging} 
+            size="sm"
+            label="घर का फ़ोन"
+            className="hidden sm:inline-flex"
+          />
+
           {/* Audio Only Mode Toggle */}
           <button
             id="btn-stream-mode-toggle"
@@ -565,6 +584,13 @@ export const RemoteMonitorView: React.FC<RemoteMonitorViewProps> = ({
               )}
             </span>
 
+            {/* Home Device Battery Indicator Badge */}
+            <BatteryIndicator 
+              level={homeBatteryLevel} 
+              isCharging={homeIsCharging} 
+              size="sm"
+            />
+
             {remoteTorchActive && (
               <span className="px-2 py-0.5 rounded bg-amber-500 text-[10px] text-slate-950 font-bold flex items-center gap-1">
                 <Flashlight className="w-3 h-3" />
@@ -648,6 +674,41 @@ export const RemoteMonitorView: React.FC<RemoteMonitorViewProps> = ({
         {/* Right Controls Panel: कैमरा, फ्लैशलाइट, वॉइस व वॉइस फ़िल्टर */}
         <div className="w-full md:w-88 bg-slate-900 border-t md:border-t-0 md:border-l border-slate-800 p-4 flex flex-col gap-4 overflow-y-auto shrink-0">
           
+          {/* Section 0: Home Device Battery & Health Monitor */}
+          <div className="p-3.5 rounded-xl bg-slate-800/60 border border-slate-700/60">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
+                <Smartphone className="w-4 h-4 text-emerald-400" />
+                घर के फ़ोन की बैटरी
+              </span>
+              <BatteryIndicator 
+                level={homeBatteryLevel} 
+                isCharging={homeIsCharging} 
+                size="sm" 
+              />
+            </div>
+            <div className="text-[11px] text-slate-400 leading-relaxed">
+              {homeBatteryLevel !== null ? (
+                <>
+                  बैटरी: <b className="text-white">{homeBatteryLevel}%</b>{' '}
+                  {homeIsCharging ? (
+                    <span className="text-emerald-400 font-medium">(चार्जर लगा है ⚡)</span>
+                  ) : (
+                    <span>(बैटरी बैकअप पर)</span>
+                  )}
+                  {homeBatteryLevel <= 20 && !homeIsCharging && (
+                    <div className="mt-1.5 p-2 rounded-lg bg-red-950/40 border border-red-800/60 text-red-400 text-[11px] flex items-center gap-1.5">
+                      <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                      <span>चेतावनी: बैटरी 20% से कम है! कृपया घर के फ़ोन को चार्जिंग पर लगाएँ।</span>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <span>घर वाले मोबाइल से बैटरी स्तर लोड हो रहा है...</span>
+              )}
+            </div>
+          </div>
+
           {/* Section 1: Flashlight Button */}
           <div className="p-3.5 rounded-xl bg-slate-800/60 border border-slate-700/60">
             <div className="flex items-center justify-between mb-2">

@@ -22,4 +22,6 @@ export interface DeviceStatus {
   voiceFilter: VoiceFilterType;
   streamMode: StreamMode;
   audioLevel: number;
+  batteryLevel?: number | null;
+  isCharging?: boolean;
 }

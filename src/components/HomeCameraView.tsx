@@ -25,6 +25,8 @@ import {
 import { VoiceFilterType } from '../types/camera';
 import { VoiceFilterProcessor } from '../utils/audioFilter';
 import { RTC_CONFIG, toggleTorch, optimizeVideoSender } from '../utils/webrtc';
+import { BatteryIndicator } from './BatteryIndicator';
+import { useBatteryStatus } from '../hooks/useBatteryStatus';
 
 interface HomeCameraViewProps {
   roomCode: string;
@@ -60,6 +62,9 @@ export const HomeCameraView: React.FC<HomeCameraViewProps> = ({
   const [audioLevel, setAudioLevel] = useState(0);
   const [currentTime, setCurrentTime] = useState(new Date().toLocaleTimeString());
   const [statusMessage, setStatusMessage] = useState('रिटर्न स्टैंडबाय मोड: बाहर वाले के जुड़ने पर कैमरा-माइक स्वतः चालू होगा');
+
+  // Battery Level & Charging Status Hook (Web Battery API)
+  const { batteryLevel, isCharging } = useBatteryStatus();
 
   // Refs
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -467,7 +472,7 @@ export const HomeCameraView: React.FC<HomeCameraViewProps> = ({
   };
 
   // Broadcast device status to connected remotes
-  const broadcastStatus = (partial: any) => {
+  const broadcastStatus = useCallback((partial: any = {}) => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({
         type: 'status-update',
@@ -477,11 +482,20 @@ export const HomeCameraView: React.FC<HomeCameraViewProps> = ({
           isTorchOn,
           facingMode,
           voiceFilter,
+          batteryLevel,
+          isCharging,
           ...partial,
         },
       }));
     }
-  };
+  }, [roomCode, isStreaming, isTorchOn, facingMode, voiceFilter, batteryLevel, isCharging]);
+
+  // Automatically broadcast battery status changes to connected remotes
+  useEffect(() => {
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN && connectedRemotes > 0) {
+      broadcastStatus({ batteryLevel, isCharging });
+    }
+  }, [batteryLevel, isCharging, connectedRemotes, broadcastStatus]);
 
   // Setup WebSocket Signaling
   useEffect(() => {
@@ -517,6 +531,10 @@ export const HomeCameraView: React.FC<HomeCameraViewProps> = ({
         if (msg.type === 'remote-connected') {
           setConnectedRemotes((prev) => prev + 1);
           startMedia();
+          // Send immediate battery status to newly joined remote viewer
+          setTimeout(() => {
+            broadcastStatus({ batteryLevel, isCharging });
+          }, 200);
         }
 
         // AUTO-SHUTDOWN CAMERA & MIC when remote disconnects!
@@ -610,7 +628,17 @@ export const HomeCameraView: React.FC<HomeCameraViewProps> = ({
             <span>{connectedRemotes} जुड़े हैं</span>
           </div>
 
-          <p className="text-[11px] text-slate-600 pt-8">
+          {/* Battery Indicator in Screensaver Mode */}
+          <div className="pt-1 flex justify-center">
+            <BatteryIndicator 
+              level={batteryLevel} 
+              isCharging={isCharging} 
+              size="md" 
+              label="डिवाइस बैटरी" 
+            />
+          </div>
+
+          <p className="text-[11px] text-slate-600 pt-6">
             स्क्रीन पर कहीं भी टच करके सामान्य स्क्रीन पर लौटें
           </p>
         </div>
@@ -652,6 +680,14 @@ export const HomeCameraView: React.FC<HomeCameraViewProps> = ({
         </div>
 
         <div className="flex items-center gap-2">
+          {/* Battery Status in Header */}
+          <BatteryIndicator 
+            level={batteryLevel} 
+            isCharging={isCharging} 
+            size="sm"
+            className="hidden sm:inline-flex"
+          />
+
           {/* Stealth Clock Screen Saver Button */}
           <button
             id="btn-screensaver-toggle"
@@ -760,6 +796,34 @@ export const HomeCameraView: React.FC<HomeCameraViewProps> = ({
               अनुमति दें
             </button>
           )}
+        </div>
+
+        {/* Device Battery Level Card */}
+        <div className="w-full bg-slate-900/90 border border-slate-800 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-md">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 bg-slate-800 text-slate-300 border border-slate-700/60">
+              <Smartphone className="w-5 h-5 text-emerald-400" />
+            </div>
+            <div>
+              <div className="text-xs sm:text-sm font-bold text-slate-200 flex items-center gap-2">
+                <span>डिवाइस बैटरी व पावर मॉनिटर</span>
+              </div>
+              <div className="text-[11px] text-slate-400">
+                {batteryLevel !== null
+                  ? `बैटरी: ${batteryLevel}% ${isCharging ? '• चार्जर लगा है ⚡' : '• बैटरी बैकअप पर'}`
+                  : 'डिवाइस बैटरी सेंसर लोड हो रहा है'}
+                {' '}• बाहर वाले मोबाइल को लाइव दिखेगी
+              </div>
+            </div>
+          </div>
+
+          <div className="self-end sm:self-auto">
+            <BatteryIndicator 
+              level={batteryLevel} 
+              isCharging={isCharging} 
+              size="md"
+            />
+          </div>
         </div>
 
         {/* WhatsApp & IMO Call Protection Card */}
