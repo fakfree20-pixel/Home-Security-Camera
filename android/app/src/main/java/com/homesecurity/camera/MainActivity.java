@@ -43,6 +43,8 @@ public class MainActivity extends AppCompatActivity {
         settings.setMediaPlaybackRequiresUserGesture(false);
         settings.setAllowFileAccess(true);
         settings.setAllowContentAccess(true);
+        settings.setAllowFileAccessFromFileURLs(true);
+        settings.setAllowUniversalAccessFromFileURLs(true);
         settings.setCacheMode(WebSettings.LOAD_DEFAULT);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
@@ -62,7 +64,22 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
-        webView.loadUrl(APP_URL);
+        // Load local bundled assets directly inside APK to eliminate Google Login screens entirely!
+        boolean hasLocalAssets = false;
+        try {
+            String[] assets = getAssets().list("dist");
+            if (assets != null && assets.length > 0) {
+                hasLocalAssets = true;
+            }
+        } catch (Exception e) {
+            hasLocalAssets = false;
+        }
+
+        if (hasLocalAssets) {
+            webView.loadUrl("file:///android_asset/dist/index.html");
+        } else {
+            webView.loadUrl(APP_URL);
+        }
     }
 
     private void checkAndRequestPermissions() {

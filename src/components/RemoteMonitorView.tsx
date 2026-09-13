@@ -23,7 +23,7 @@ import {
   Smartphone
 } from 'lucide-react';
 import { StreamMode, VoiceFilterType } from '../types/camera';
-import { RTC_CONFIG } from '../utils/webrtc';
+import { RTC_CONFIG, getSignalingServerUrl } from '../utils/webrtc';
 import { BatteryIndicator } from './BatteryIndicator';
 
 interface RemoteMonitorViewProps {
@@ -115,8 +115,7 @@ export const RemoteMonitorView: React.FC<RemoteMonitorViewProps> = ({
   }, [roomCode]);
 
   useEffect(() => {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}`;
+    const wsUrl = getSignalingServerUrl();
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
 

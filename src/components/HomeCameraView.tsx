@@ -24,7 +24,7 @@ import {
 } from 'lucide-react';
 import { VoiceFilterType } from '../types/camera';
 import { VoiceFilterProcessor } from '../utils/audioFilter';
-import { RTC_CONFIG, toggleTorch, optimizeVideoSender } from '../utils/webrtc';
+import { RTC_CONFIG, toggleTorch, optimizeVideoSender, getSignalingServerUrl } from '../utils/webrtc';
 import { BatteryIndicator } from './BatteryIndicator';
 import { useBatteryStatus } from '../hooks/useBatteryStatus';
 
@@ -499,8 +499,7 @@ export const HomeCameraView: React.FC<HomeCameraViewProps> = ({
 
   // Setup WebSocket Signaling
   useEffect(() => {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}`;
+    const wsUrl = getSignalingServerUrl();
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
 

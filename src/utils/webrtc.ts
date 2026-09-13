@@ -118,3 +118,27 @@ export function generateRoomCode(): string {
   const num2 = Math.floor(100 + Math.random() * 900);
   return `${num1}-${num2}`;
 }
+
+/**
+ * Resolves the WebSocket signaling URL.
+ * Works seamlessly in web, PWA, and local offline APK bundles.
+ */
+export function getSignalingServerUrl(): string {
+  try {
+    const custom = localStorage.getItem('camera_custom_server');
+    if (custom && custom.trim()) {
+      return custom.trim();
+    }
+  } catch (e) {
+    // Ignore storage errors
+  }
+
+  if (typeof window !== 'undefined' && window.location) {
+    if (window.location.host && window.location.protocol !== 'file:') {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      return `${protocol}//${window.location.host}`;
+    }
+  }
+
+  return 'wss://ais-dev-ptg3ppxsx7luo6vkbh5x5t-257389990740.europe-west2.run.app';
+}

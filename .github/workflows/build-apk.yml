@@ -30,6 +30,11 @@ jobs:
     - name: Build Web app
       run: npm run build
 
+    - name: Copy Web app into Android Assets
+      run: |
+        mkdir -p android/app/src/main/assets
+        cp -r dist android/app/src/main/assets/
+
     - name: Set up JDK 17
       uses: actions/setup-java@v4
       with:
