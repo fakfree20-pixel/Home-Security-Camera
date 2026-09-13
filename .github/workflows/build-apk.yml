@@ -10,6 +10,10 @@ on:
 jobs:
   build-apk:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
     - name: Checkout repository
@@ -35,28 +39,31 @@ jobs:
     - name: Setup Android SDK
       uses: android-actions/setup-android@v3
 
-    - name: Setup Gradle
-      uses: gradle/actions/setup-gradle@v3
-
-    - name: Prepare Gradle Wrapper
-      working-directory: ./android
+    - name: Accept Android Licenses
       run: |
-        gradle wrapper --gradle-version 8.4 || true
-        chmod +x gradlew || true
+        yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || yes | sdkmanager --licenses || true
+
+    - name: Setup Gradle
+      uses: gradle/actions/setup-gradle@v4
+      with:
+        gradle-version: '8.5'
 
     - name: Build Android Debug APK
       working-directory: ./android
-      run: |
-        if [ -f "./gradlew" ]; then
-          ./gradlew assembleDebug --stacktrace
-        else
-          gradle assembleDebug --stacktrace
-        fi
+      run: gradle assembleDebug --no-daemon --stacktrace
 
     - name: Prepare Output APK
       run: |
         mkdir -p output-apk
-        find android/app/build/outputs/apk -name "*.apk" -exec cp {} output-apk/Home-Security-Camera.apk \;
+        APK_PATH=$(find android/app/build/outputs/apk -name "*debug.apk" | head -n 1)
+        if [ -n "$APK_PATH" ]; then
+          cp "$APK_PATH" output-apk/Home-Security-Camera.apk
+          echo "Found APK at $APK_PATH"
+        else
+          find android/app/build/outputs/apk -type f
+          echo "No debug APK found!"
+          exit 1
+        fi
 
     - name: Upload APK Artifact
       uses: actions/upload-artifact@v4
@@ -78,3 +85,4 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       continue-on-error: true
+
