@@ -24,7 +24,8 @@ import {
 } from 'lucide-react';
 import { VoiceFilterType } from '../types/camera';
 import { VoiceFilterProcessor } from '../utils/audioFilter';
-import { RTC_CONFIG, toggleTorch, optimizeVideoSender, getSignalingServerUrl } from '../utils/webrtc';
+import { RTC_CONFIG, toggleTorch, optimizeVideoSender } from '../utils/webrtc';
+import { createSignalingClient, SignalingClient } from '../utils/signaling';
 import { BatteryIndicator } from './BatteryIndicator';
 import { useBatteryStatus } from '../hooks/useBatteryStatus';
 
@@ -69,7 +70,7 @@ export const HomeCameraView: React.FC<HomeCameraViewProps> = ({
   // Refs
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const wsRef = useRef<WebSocket | null>(null);
+  const signalingRef = useRef<SignalingClient | null>(null);
   const peerConnectionsRef = useRef<Map<string, RTCPeerConnection>>(new Map());
   const filterProcessorRef = useRef<VoiceFilterProcessor>(new VoiceFilterProcessor());
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -131,18 +132,12 @@ export const HomeCameraView: React.FC<HomeCameraViewProps> = ({
     setStatusMessage(`📞 व्हाट्सएप/इमो कॉल प्राथमिकता: कैमरा व माइक फ्री किया गया (${reason})`);
 
     // Broadcast status to remote monitor so viewer understands
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({
-        type: 'status-update',
-        code: roomCode,
-        payload: {
-          isStreaming: false,
-          isPhoneCallActive: true,
-          callReason: reason,
-        },
-      }));
-    }
-  }, [stopMedia, roomCode]);
+    signalingRef.current?.sendStatusUpdate({
+      isStreaming: false,
+      isPhoneCallActive: true,
+      callReason: reason,
+    });
+  }, [stopMedia]);
 
   // Resume Media after Call ends
   const resumeMediaAfterCall = useCallback(() => {
@@ -151,16 +146,10 @@ export const HomeCameraView: React.FC<HomeCameraViewProps> = ({
     setCallReason('');
     setStatusMessage('कॉल समाप्त: कैमरा व माइक पुनः स्टैंडबाय / सक्रिय मोड में है।');
 
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({
-        type: 'status-update',
-        code: roomCode,
-        payload: {
-          isPhoneCallActive: false,
-          callReason: '',
-        },
-      }));
-    }
+    signalingRef.current?.sendStatusUpdate({
+      isPhoneCallActive: false,
+      callReason: '',
+    });
 
     // Auto-restart stream if remote viewers are present
     if (connectedRemotes > 0) {
@@ -374,30 +363,22 @@ export const HomeCameraView: React.FC<HomeCameraViewProps> = ({
       };
 
       pc.onicecandidate = (event) => {
-        if (event.candidate && wsRef.current?.readyState === WebSocket.OPEN) {
-          wsRef.current.send(JSON.stringify({
-            type: 'signal',
-            code: roomCode,
-            payload: {
-              type: 'candidate',
-              candidate: event.candidate,
-            },
-          }));
+        if (event.candidate && signalingRef.current) {
+          signalingRef.current.sendSignal({
+            type: 'candidate',
+            candidate: event.candidate,
+          });
         }
       };
 
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
 
-      if (wsRef.current?.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({
-          type: 'signal',
-          code: roomCode,
-          payload: {
-            type: 'offer',
-            sdp: pc.localDescription,
-          },
-        }));
+      if (signalingRef.current) {
+        signalingRef.current.sendSignal({
+          type: 'offer',
+          sdp: pc.localDescription,
+        });
       }
     } catch (err) {
       console.error('Error creating WebRTC offer:', err);
@@ -473,114 +454,92 @@ export const HomeCameraView: React.FC<HomeCameraViewProps> = ({
 
   // Broadcast device status to connected remotes
   const broadcastStatus = useCallback((partial: any = {}) => {
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({
-        type: 'status-update',
-        code: roomCode,
-        payload: {
-          isStreaming,
-          isTorchOn,
-          facingMode,
-          voiceFilter,
-          batteryLevel,
-          isCharging,
-          ...partial,
-        },
-      }));
+    if (signalingRef.current) {
+      signalingRef.current.sendStatusUpdate({
+        isStreaming,
+        isTorchOn,
+        facingMode,
+        voiceFilter,
+        batteryLevel,
+        isCharging,
+        ...partial,
+      });
     }
-  }, [roomCode, isStreaming, isTorchOn, facingMode, voiceFilter, batteryLevel, isCharging]);
+  }, [isStreaming, isTorchOn, facingMode, voiceFilter, batteryLevel, isCharging]);
 
   // Automatically broadcast battery status changes to connected remotes
   useEffect(() => {
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN && connectedRemotes > 0) {
+    if (connectedRemotes > 0) {
       broadcastStatus({ batteryLevel, isCharging });
     }
   }, [batteryLevel, isCharging, connectedRemotes, broadcastStatus]);
 
-  // Setup WebSocket Signaling
+  // Setup Universal Public MQTT Signaling
   useEffect(() => {
-    const wsUrl = getSignalingServerUrl();
-    const ws = new WebSocket(wsUrl);
-    wsRef.current = ws;
-
-    ws.onopen = () => {
-      setWsStatus('connected');
-      ws.send(JSON.stringify({
-        type: 'register-home',
-        code: roomCode,
-      }));
-    };
-
-    ws.onclose = () => {
-      setWsStatus('disconnected');
-    };
-
-    ws.onmessage = async (event) => {
-      try {
-        const msg = JSON.parse(event.data);
-
-        if (msg.type === 'registered') {
-          setConnectedRemotes(msg.remoteCount || 0);
-          if (msg.remoteCount > 0) {
-            startMedia();
+    const client = createSignalingClient('home', roomCode, {
+      onStatusChange: (status) => {
+        if (status === 'connected') {
+          setWsStatus('connected');
+        } else if (status === 'connecting') {
+          setWsStatus('connecting');
+        } else {
+          setWsStatus('disconnected');
+        }
+      },
+      onMessage: async (msg) => {
+        try {
+          // AUTO-START CAMERA & MIC when remote connects!
+          if (msg.type === 'join-remote') {
+            setConnectedRemotes((prev) => Math.max(1, prev + 1));
+            if (startMediaRef.current) {
+              startMediaRef.current();
+            }
+            // Send immediate battery status to newly joined remote viewer
+            setTimeout(() => {
+              broadcastStatus({ batteryLevel, isCharging });
+            }, 300);
           }
-        }
 
-        // AUTO-START CAMERA & MIC when remote connects!
-        if (msg.type === 'remote-connected') {
-          setConnectedRemotes((prev) => prev + 1);
-          startMedia();
-          // Send immediate battery status to newly joined remote viewer
-          setTimeout(() => {
-            broadcastStatus({ batteryLevel, isCharging });
-          }, 200);
-        }
-
-        // AUTO-SHUTDOWN CAMERA & MIC when remote disconnects!
-        if (msg.type === 'remote-disconnected') {
-          const remaining = msg.remainingRemotes ?? 0;
-          setConnectedRemotes(remaining);
-          if (remaining <= 0) {
+          // AUTO-SHUTDOWN CAMERA & MIC when remote disconnects!
+          if (msg.type === 'remote-disconnected') {
+            setConnectedRemotes(0);
             stopMedia();
           }
-        }
 
-        if (msg.type === 'signal' && msg.from === 'remote') {
-          handleRemoteSignal(msg.payload);
-        }
-
-        // Remote Controls sent by viewer
-        if (msg.type === 'control') {
-          if (msg.action === 'toggle-torch') {
-            handleToggleTorch();
-          } else if (msg.action === 'switch-camera') {
-            handleSwitchCamera();
-          } else if (msg.action === 'set-voice-filter') {
-            handleVoiceFilterChange(msg.value);
-          } else if (msg.action === 'stop-stream') {
-            stopMedia();
-          } else if (msg.action === 'start-stream') {
-            startMedia();
+          if (msg.type === 'signal' && msg.from === 'remote') {
+            handleRemoteSignal(msg.payload);
           }
-        }
-      } catch (err) {
-        console.error('Error handling WS message on home:', err);
-      }
-    };
 
-    // Keepalive ping every 15s to prevent mobile carriers from dropping TCP connections
-    const pingTimer = setInterval(() => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'ping', timestamp: Date.now() }));
-      }
-    }, 15000);
+          // Remote Controls sent by viewer
+          if (msg.type === 'control') {
+            if (msg.action === 'toggle-torch') {
+              handleToggleTorch();
+            } else if (msg.action === 'switch-camera') {
+              handleSwitchCamera();
+            } else if (msg.action === 'set-voice-filter') {
+              handleVoiceFilterChange(msg.value);
+            } else if (msg.action === 'stop-stream') {
+              stopMedia();
+            } else if (msg.action === 'start-stream') {
+              if (startMediaRef.current) {
+                startMediaRef.current();
+              }
+            }
+          }
+        } catch (err) {
+          console.error('Error handling signaling message on home:', err);
+        }
+      },
+    });
+
+    signalingRef.current = client;
 
     return () => {
-      clearInterval(pingTimer);
-      ws.close();
+      client.cleanup();
+      signalingRef.current = null;
       stopMedia();
     };
-  }, [roomCode, startMedia, stopMedia]);
+  }, [roomCode, broadcastStatus, stopMedia]);
 
   const handleCopyCode = () => {
     navigator.clipboard.writeText(roomCode);

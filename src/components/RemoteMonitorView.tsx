@@ -23,7 +23,8 @@ import {
   Smartphone
 } from 'lucide-react';
 import { StreamMode, VoiceFilterType } from '../types/camera';
-import { RTC_CONFIG, getSignalingServerUrl } from '../utils/webrtc';
+import { RTC_CONFIG } from '../utils/webrtc';
+import { createSignalingClient, SignalingClient } from '../utils/signaling';
 import { BatteryIndicator } from './BatteryIndicator';
 
 interface RemoteMonitorViewProps {
@@ -51,10 +52,12 @@ export const RemoteMonitorView: React.FC<RemoteMonitorViewProps> = ({
   const [homeCallReason, setHomeCallReason] = useState('');
   const [homeBatteryLevel, setHomeBatteryLevel] = useState<number | null>(null);
   const [homeIsCharging, setHomeIsCharging] = useState(false);
+  const [signalingStatus, setSignalingStatus] = useState<'connecting' | 'connected' | 'error'>('connecting');
+  const [homeDetected, setHomeDetected] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
-  const wsRef = useRef<WebSocket | null>(null);
+  const signalingRef = useRef<SignalingClient | null>(null);
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const analyserCtxRef = useRef<AudioContext | null>(null);
@@ -63,30 +66,17 @@ export const RemoteMonitorView: React.FC<RemoteMonitorViewProps> = ({
 
   // Send Remote Commands to home device
   const sendControl = (action: string, value?: any) => {
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({
-        type: 'control',
-        code: roomCode,
-        action,
-        value,
-      }));
-    }
+    signalingRef.current?.sendControl(action, value);
   };
 
   // Safe Exit: Notify Home Device so it immediately turns off Camera and Mic!
   const handleSafeDisconnect = () => {
     try {
-      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({
-          type: 'disconnect-remote',
-          code: roomCode,
-        }));
-        wsRef.current.send(JSON.stringify({
-          type: 'control',
-          code: roomCode,
-          action: 'stop-stream',
-        }));
-        wsRef.current.close();
+      if (signalingRef.current) {
+        signalingRef.current.sendControl('stop-stream');
+        signalingRef.current.notifyLeave();
+        signalingRef.current.cleanup();
+        signalingRef.current = null;
       }
       if (pcRef.current) {
         pcRef.current.close();
@@ -101,101 +91,85 @@ export const RemoteMonitorView: React.FC<RemoteMonitorViewProps> = ({
   // On window unload / close, automatically notify home device
   useEffect(() => {
     const handleBeforeUnload = () => {
-      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({
-          type: 'disconnect-remote',
-          code: roomCode,
-        }));
-      }
+      signalingRef.current?.sendControl('stop-stream');
+      signalingRef.current?.notifyLeave();
     };
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
     };
-  }, [roomCode]);
+  }, []);
 
   useEffect(() => {
-    const wsUrl = getSignalingServerUrl();
-    const ws = new WebSocket(wsUrl);
-    wsRef.current = ws;
-
-    ws.onopen = () => {
-      ws.send(JSON.stringify({
-        type: 'join-remote',
-        code: roomCode,
-      }));
-      // Initial ping for latency check
-      ws.send(JSON.stringify({ type: 'ping', timestamp: Date.now() }));
-    };
-
-    ws.onmessage = async (event) => {
-      try {
-        const msg = JSON.parse(event.data);
-
-        // Pong handler to calculate round-trip latency
-        if (msg.type === 'pong' && msg.timestamp) {
-          setPingMs(Date.now() - msg.timestamp);
+    const client = createSignalingClient('remote', roomCode, {
+      onStatusChange: (status) => {
+        if (status === 'connected') {
+          setSignalingStatus('connected');
+        } else if (status === 'connecting') {
+          setSignalingStatus('connecting');
+        } else {
+          setSignalingStatus('error');
         }
+      },
+      onMessage: async (msg) => {
+        try {
+          if (msg.type === 'home-online' || msg.type === 'home-heartbeat') {
+            setHomeDetected(true);
+            setConnectionStatus((prev) => (prev === 'connected' ? 'connected' : 'connecting'));
+            client.sendControl('start-stream');
+          }
 
-        if (msg.type === 'joined') {
-          if (msg.homeOnline || msg.homeConnected) {
-            setConnectionStatus('connecting');
-            // Request home device to start media
-            sendControl('start-stream');
-          } else {
+          if (msg.type === 'home-offline') {
+            setHomeDetected(false);
             setConnectionStatus('disconnected');
+            setIsHomeStreaming(false);
           }
-        }
 
-        if (msg.type === 'home-online' || msg.type === 'home-joined') {
-          setConnectionStatus('connecting');
-          sendControl('start-stream');
-        }
+          if (msg.type === 'signal' && msg.from === 'home') {
+            setHomeDetected(true);
+            handleHomeSignal(msg.payload);
+          }
 
-        if (msg.type === 'home-offline' || msg.type === 'home-left') {
-          setConnectionStatus('disconnected');
-          setIsHomeStreaming(false);
+          if (msg.type === 'status-update') {
+            setHomeDetected(true);
+            if (msg.payload.isTorchOn !== undefined) {
+              setRemoteTorchActive(msg.payload.isTorchOn);
+            }
+            if (msg.payload.voiceFilter) {
+              setRemoteVoiceFilter(msg.payload.voiceFilter);
+            }
+            if (msg.payload.isStreaming !== undefined) {
+              setIsHomeStreaming(msg.payload.isStreaming);
+            }
+            if (msg.payload.isPhoneCallActive !== undefined) {
+              setIsHomeInPhoneCall(msg.payload.isPhoneCallActive);
+              setHomeCallReason(msg.payload.callReason || '');
+            }
+            if (msg.payload.batteryLevel !== undefined) {
+              setHomeBatteryLevel(msg.payload.batteryLevel);
+            }
+            if (msg.payload.isCharging !== undefined) {
+              setHomeIsCharging(!!msg.payload.isCharging);
+            }
+          }
+        } catch (err) {
+          console.error('Error handling signaling message on remote:', err);
         }
+      },
+    });
 
-        if (msg.type === 'signal' && msg.from === 'home') {
-          handleHomeSignal(msg.payload);
-        }
+    signalingRef.current = client;
 
-        if (msg.type === 'status-update') {
-          if (msg.payload.isTorchOn !== undefined) {
-            setRemoteTorchActive(msg.payload.isTorchOn);
-          }
-          if (msg.payload.voiceFilter) {
-            setRemoteVoiceFilter(msg.payload.voiceFilter);
-          }
-          if (msg.payload.isStreaming !== undefined) {
-            setIsHomeStreaming(msg.payload.isStreaming);
-          }
-          if (msg.payload.isPhoneCallActive !== undefined) {
-            setIsHomeInPhoneCall(msg.payload.isPhoneCallActive);
-            setHomeCallReason(msg.payload.callReason || '');
-          }
-          if (msg.payload.batteryLevel !== undefined) {
-            setHomeBatteryLevel(msg.payload.batteryLevel);
-          }
-          if (msg.payload.isCharging !== undefined) {
-            setHomeIsCharging(!!msg.payload.isCharging);
-          }
-        }
-      } catch (err) {
-        console.error('Error handling WS message on remote:', err);
+    // Retry requesting stream every 3s if not yet connected
+    const retryTimer = setInterval(() => {
+      if (connectionStatus !== 'connected' && signalingRef.current) {
+        signalingRef.current.notifyJoined();
+        signalingRef.current.sendControl('start-stream');
       }
-    };
-
-    // Keepalive ping every 15s to keep mobile carriers from cutting idle TCP connection
-    const pingTimer = setInterval(() => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'ping', timestamp: Date.now() }));
-      }
-    }, 15000);
+    }, 3000);
 
     return () => {
-      clearInterval(pingTimer);
+      clearInterval(retryTimer);
       if (animFrameRef.current) {
         cancelAnimationFrame(animFrameRef.current);
         animFrameRef.current = null;
@@ -204,20 +178,13 @@ export const RemoteMonitorView: React.FC<RemoteMonitorViewProps> = ({
         analyserCtxRef.current.close().catch(() => {});
         analyserCtxRef.current = null;
       }
-      try {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({
-            type: 'disconnect-remote',
-            code: roomCode,
-          }));
-          ws.close();
-        }
-      } catch (e) {}
+      client.cleanup();
+      signalingRef.current = null;
       if (pcRef.current) {
         pcRef.current.close();
       }
     };
-  }, [roomCode]);
+  }, [roomCode, connectionStatus]);
 
   const handleHomeSignal = async (payload: any) => {
     if (payload.type === 'offer') {
@@ -262,15 +229,11 @@ export const RemoteMonitorView: React.FC<RemoteMonitorViewProps> = ({
         };
 
         pc.onicecandidate = (event) => {
-          if (event.candidate && wsRef.current?.readyState === WebSocket.OPEN) {
-            wsRef.current.send(JSON.stringify({
-              type: 'signal',
-              code: roomCode,
-              payload: {
-                type: 'candidate',
-                candidate: event.candidate,
-              },
-            }));
+          if (event.candidate && signalingRef.current) {
+            signalingRef.current.sendSignal({
+              type: 'candidate',
+              candidate: event.candidate,
+            });
           }
         };
 
@@ -291,15 +254,11 @@ export const RemoteMonitorView: React.FC<RemoteMonitorViewProps> = ({
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
 
-        if (wsRef.current?.readyState === WebSocket.OPEN) {
-          wsRef.current.send(JSON.stringify({
-            type: 'signal',
-            code: roomCode,
-            payload: {
-              type: 'answer',
-              sdp: pc.localDescription,
-            },
-          }));
+        if (signalingRef.current) {
+          signalingRef.current.sendSignal({
+            type: 'answer',
+            sdp: pc.localDescription,
+          });
         }
       } catch (err) {
         console.error('Error handling WebRTC offer on remote:', err);
@@ -535,13 +494,30 @@ export const RemoteMonitorView: React.FC<RemoteMonitorViewProps> = ({
           {/* Connection Overlay when not connected */}
           {connectionStatus !== 'connected' && !isHomeInPhoneCall && (
             <div className="absolute inset-0 bg-slate-950/90 backdrop-blur-xs flex flex-col items-center justify-center p-6 text-center z-10">
-              <div className="w-12 h-12 rounded-full border-3 border-blue-500 border-t-transparent animate-spin mb-4"></div>
+              <div className="w-12 h-12 rounded-full border-3 border-emerald-500 border-t-transparent animate-spin mb-4"></div>
               <h3 className="text-base font-bold text-slate-200">
-                घर वाले मोबाइल से कनेक्ट हो रहा है...
+                {signalingStatus === 'connecting'
+                  ? '🌐 ग्लोबल रिले नेटवर्क से जुड़ रहा है...'
+                  : homeDetected
+                  ? 'घर का कैमरा ऑनलाइन है! लाइव स्ट्रीम शुरू हो रही है...'
+                  : 'घर वाले फ़ोन का इंतज़ार है...'}
               </h3>
-              <p className="text-xs text-slate-400 max-w-sm mt-1">
+              <p className="text-xs text-slate-400 max-w-sm mt-2 leading-relaxed">
                 घर वाले फ़ोन में कोड <b className="text-emerald-400 font-mono">{roomCode}</b> चालू रखें। जुड़ते ही कैमरा व माइक स्वतः ऑन हो जाएँगे।
               </p>
+              <div className="mt-4 flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    signalingRef.current?.notifyJoined();
+                    signalingRef.current?.sendControl('start-stream');
+                  }}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 active:scale-95 text-emerald-400 text-xs font-bold rounded-xl shadow transition flex items-center gap-1.5 cursor-pointer"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>पुनः सिग्नल भेजें (रीफ्रेश)</span>
+                </button>
+              </div>
             </div>
           )}
 

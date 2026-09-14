@@ -22,16 +22,19 @@ export const DeviceSelector: React.FC<DeviceSelectorProps> = ({
   const [joinError, setJoinError] = useState('');
 
   const handleStartHome = () => {
-    if (!homeCode.trim()) {
-      setHomeCode(generateRoomCode());
+    const clean = homeCode.trim().toUpperCase().replace(/[^A-Z0-9]/gi, '');
+    if (!clean) {
+      const newCode = generateRoomCode();
+      setHomeCode(newCode);
+      onSelectRole('home', newCode);
       return;
     }
-    onSelectRole('home', homeCode.trim().toUpperCase());
+    onSelectRole('home', clean);
   };
 
   const handleJoinRemote = (e: React.FormEvent) => {
     e.preventDefault();
-    const clean = joinCode.trim().toUpperCase();
+    const clean = joinCode.trim().toUpperCase().replace(/[^A-Z0-9]/gi, '');
     if (!clean) {
       setJoinError('कृपया कोड दर्ज करें');
       return;
