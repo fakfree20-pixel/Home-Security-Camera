@@ -17,18 +17,18 @@ export const DeviceSelector: React.FC<DeviceSelectorProps> = ({
   onSelectRole,
   onOpenGuide,
 }) => {
-  const [homeCode, setHomeCode] = useState(() => generateRoomCode());
+  const [homeCode, setHomeCode] = useState('');
+  const [homeError, setHomeError] = useState('');
   const [joinCode, setJoinCode] = useState('');
   const [joinError, setJoinError] = useState('');
 
   const handleStartHome = () => {
     const clean = homeCode.trim().toUpperCase().replace(/[^A-Z0-9]/gi, '');
     if (!clean) {
-      const newCode = generateRoomCode();
-      setHomeCode(newCode);
-      onSelectRole('home', newCode);
+      setHomeError('कृपया कोड दर्ज करें');
       return;
     }
+    setHomeError('');
     onSelectRole('home', clean);
   };
 
@@ -82,13 +82,19 @@ export const DeviceSelector: React.FC<DeviceSelectorProps> = ({
                 id="home-custom-code"
                 type="text"
                 value={homeCode}
-                onChange={(e) => setHomeCode(e.target.value.toUpperCase())}
+                onChange={(e) => {
+                  setHomeCode(e.target.value.toUpperCase());
+                  setHomeError('');
+                }}
                 className="flex-1 px-3 py-2 text-base font-mono font-bold bg-slate-50 border border-slate-300 rounded-xl text-slate-900 tracking-wider text-center focus:outline-none focus:border-blue-600"
                 placeholder="कोड"
               />
               <button
                 type="button"
-                onClick={() => setHomeCode(generateRoomCode())}
+                onClick={() => {
+                  setHomeCode(generateRoomCode());
+                  setHomeError('');
+                }}
                 className="px-3 py-2 text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-medium transition flex items-center gap-1 cursor-pointer"
                 title="नया कोड बनाएँ"
               >
@@ -96,6 +102,11 @@ export const DeviceSelector: React.FC<DeviceSelectorProps> = ({
                 <span>नया</span>
               </button>
             </div>
+            {homeError && (
+              <p className="mt-2 text-xs text-red-500 font-medium">
+                {homeError}
+              </p>
+            )}
           </div>
 
           <button
